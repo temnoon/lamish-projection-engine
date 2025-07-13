@@ -1,0 +1,86 @@
+{
+  "name": "namespace",
+  "version": "1.0",
+  "fields": {
+    "base_setting": {
+      "value": "lamish-galaxy",
+      "field_type": "select",
+      "description": "Base narrative setting",
+      "options": [
+        "lamish-galaxy",
+        "medieval-realm",
+        "corporate-dystopia",
+        "natural-world",
+        "quantum-realm",
+        "steampunk-era",
+        "cyberpunk-future"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266700",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "core_metaphors": {
+      "value": "frequency networks, harmonic resonance, pulse-craft",
+      "field_type": "textarea",
+      "description": "Key metaphors and concepts specific to this namespace",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266707",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "power_structures": {
+      "value": "Galactic Frequency Council, Academy hierarchies",
+      "field_type": "textarea",
+      "description": "How power and authority work in this universe",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266709",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "technology_level": {
+      "value": "advanced harmonic manipulation",
+      "field_type": "text",
+      "description": "Characteristic technology and capabilities",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266710",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "social_dynamics": {
+      "value": "resonance-based social networks",
+      "field_type": "textarea",
+      "description": "How relationships and social structures function",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266711",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "conflict_patterns": {
+      "value": "innovation vs tradition, individual vs collective harmony",
+      "field_type": "textarea",
+      "description": "Common sources of tension and conflict",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.266712",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    }
+  },
+  "prompt_templates": {
+    "core_metaphors": "For a {base_setting} setting, what metaphors would best represent {concept_type}?",
+    "power_structures": "In a {base_setting} universe, how would power and authority typically be organized?",
+    "technology_level": "What level and type of technology would fit a {base_setting} narrative universe?",
+    "mapping_rules": "How should {real_world_element} be translated into the {base_setting} universe?"
+  }
+}

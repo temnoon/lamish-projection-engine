@@ -1,0 +1,81 @@
+{
+  "name": "persona",
+  "version": "1.0",
+  "fields": {
+    "base_type": {
+      "value": "neutral",
+      "field_type": "select",
+      "description": "Base persona type",
+      "options": [
+        "neutral",
+        "advocate",
+        "critic",
+        "philosopher",
+        "storyteller",
+        "scientist",
+        "artist"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.013398",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "perspective": {
+      "value": "balanced",
+      "field_type": "select",
+      "description": "Narrative perspective approach",
+      "options": [
+        "balanced",
+        "optimistic",
+        "skeptical",
+        "analytical",
+        "emotional",
+        "detached"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.013404",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "voice_style": {
+      "value": "clear and direct",
+      "field_type": "text",
+      "description": "Characteristic voice and tone",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.013406",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "expertise_domains": {
+      "value": "general knowledge",
+      "field_type": "textarea",
+      "description": "Areas of specialized knowledge or interest",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.013407",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "bias_tendencies": {
+      "value": "minimal bias",
+      "field_type": "textarea",
+      "description": "Known biases or tendencies in interpretation",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.013408",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    }
+  },
+  "prompt_templates": {
+    "expertise_domains": "Based on the persona type '{base_type}' and perspective '{perspective}', what expertise domains would this persona naturally have?",
+    "voice_style": "What voice style would be characteristic of a {base_type} persona with a {perspective} perspective?",
+    "contextual_modifier": "Given the current narrative about {narrative_topic}, how should this {base_type} persona's approach be modified?"
+  }
+}

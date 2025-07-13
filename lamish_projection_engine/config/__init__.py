@@ -1,0 +1,1 @@
+"""Dynamic configuration management for LPE attributes."""

@@ -1,0 +1,104 @@
+{
+  "name": "language_style",
+  "version": "1.0",
+  "fields": {
+    "base_style": {
+      "value": "standard",
+      "field_type": "select",
+      "description": "Base language style",
+      "options": [
+        "standard",
+        "academic",
+        "poetic",
+        "technical",
+        "casual",
+        "formal",
+        "archaic",
+        "futuristic"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485099",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "formality_level": {
+      "value": "medium",
+      "field_type": "select",
+      "description": "Level of formality",
+      "options": [
+        "very_casual",
+        "casual",
+        "medium",
+        "formal",
+        "very_formal"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485108",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "sentence_structure": {
+      "value": "varied",
+      "field_type": "select",
+      "description": "Preferred sentence structure patterns",
+      "options": [
+        "simple",
+        "compound",
+        "complex",
+        "varied",
+        "rhythmic"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485110",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "vocabulary_level": {
+      "value": "accessible",
+      "field_type": "select",
+      "description": "Vocabulary complexity",
+      "options": [
+        "simple",
+        "accessible",
+        "elevated",
+        "technical",
+        "archaic"
+      ],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485112",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "rhetorical_devices": {
+      "value": "metaphor, analogy",
+      "field_type": "textarea",
+      "description": "Preferred rhetorical devices and literary techniques",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485115",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    },
+    "cultural_markers": {
+      "value": "universal concepts",
+      "field_type": "textarea",
+      "description": "Cultural references and linguistic markers to include/avoid",
+      "options": [],
+      "generated_by": "user",
+      "last_modified": "2025-07-12T20:35:32.485117",
+      "prompt_template": "",
+      "is_core": true,
+      "weight": 1.0
+    }
+  },
+  "prompt_templates": {
+    "rhetorical_devices": "What rhetorical devices would work best for {base_style} style writing?",
+    "cultural_markers": "For {base_style} style in a {namespace} setting, what cultural markers should be used?",
+    "adaptation_rules": "How should {base_style} style be adapted for {content_type} content?"
+  }
+}
