@@ -36,8 +36,13 @@ class OpenAIProvider(LLMProvider):
     def __init__(self):
         super().__init__("openai")
         self.base_url = "https://api.openai.com/v1"
-        self.default_model = "gpt-4"
-        self.models = ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-3.5-turbo-16k"]
+        self.default_model = "gpt-4o"
+        self.models = [
+            "gpt-4o", "gpt-4o-mini", 
+            "o1-preview", "o1-mini",
+            "gpt-4-turbo", "gpt-4", 
+            "gpt-3.5-turbo", "gpt-3.5-turbo-16k"
+        ]
     
     def generate_text(self, prompt: str, model: str = None, temperature: float = 0.7, max_tokens: int = 4096) -> str:
         """Generate text using OpenAI API."""
@@ -134,18 +139,31 @@ class GoogleProvider(LLMProvider):
         super().__init__("google")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
         self.default_model = "gemini-pro"
-        self.models = ["gemini-pro", "gemini-pro-vision"]
+        self.models = ["gemini-pro", "gemini-pro-vision", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+        self.vision_models = ["gemini-pro-vision", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
     
-    def generate_text(self, prompt: str, model: str = None, temperature: float = 0.7, max_tokens: int = 4096) -> str:
-        """Generate text using Google Gemini API."""
+    def generate_text(self, prompt: str, model: str = None, temperature: float = 0.7, max_tokens: int = 4096, image_data: str = None) -> str:
+        """Generate text using Google Gemini API with optional vision support."""
         if not self.available:
             raise Exception("Google API key not configured")
         
         model = model or self.default_model
         url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
         
+        # Build content parts
+        parts = [{"text": prompt}]
+        
+        # Add image if provided and model supports vision
+        if image_data and model in self.vision_models:
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",  # Assume JPEG, could be enhanced
+                    "data": image_data
+                }
+            })
+        
         data = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": parts}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens
@@ -163,6 +181,15 @@ class GoogleProvider(LLMProvider):
             return result['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
             raise Exception(f"Google API error: {str(e)}")
+    
+    def is_vision_model(self, model: str = None) -> bool:
+        """Check if the model supports vision."""
+        model = model or self.default_model
+        return model in self.vision_models
+    
+    def get_vision_models(self) -> List[str]:
+        """Get list of vision-capable models."""
+        return self.vision_models
     
     def test_connection(self) -> bool:
         """Test Google API connection."""

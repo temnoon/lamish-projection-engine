@@ -21,8 +21,9 @@ os.environ['LPE_USE_MOCK_LLM'] = 'false'
 # Import enhanced job manager
 from enhanced_job_manager import EnhancedJobManager, JobType
 
-# Import unified LLM manager
+# Import unified LLM manager and language config
 from llm_providers import llm_manager
+from language_config import LANGUAGE_HIERARCHY, generate_language_select_html, get_language_name
 
 # Enhanced LLM class with multi-provider support  
 class SimpleLLM:
@@ -412,6 +413,8 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             self.handle_projection_immediate(data)
         elif path == '/api/translation/round-trip':
             self.handle_translation_immediate(data)
+        elif path == '/api/vision/analyze':
+            self.handle_vision_immediate(data)
         elif path == '/api/maieutic/start':
             self.handle_maieutic_immediate(data)
         elif path == '/api/maieutic/synthesize':
@@ -489,6 +492,72 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             job_id = job_manager.create_and_complete_job(
                 JobType.TRANSLATION,
                 "Translation Analysis",
+                data,
+                result
+            )
+        
+        # Return immediate results
+        response = {
+            "success": True,
+            "job_id": job_id,
+            "result": result
+        }
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def handle_vision_immediate(self, data):
+        """Process vision analysis immediately and return results."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        # Extract data
+        prompt = data.get('prompt', 'What do you see in this image?')
+        model = data.get('model', 'gemini-pro-vision')
+        image_data = data.get('image_data', '')
+        
+        # Process immediately using Google provider with vision
+        try:
+            google_provider = llm_manager.get_provider('google')
+            if not google_provider or not google_provider.available:
+                raise Exception("Google provider not available or API key not configured")
+            
+            if model not in google_provider.get_vision_models():
+                raise Exception(f"Model {model} does not support vision")
+            
+            # Generate analysis
+            analysis = google_provider.generate_text(
+                prompt, 
+                model=model, 
+                image_data=image_data
+            )
+            
+            result = {
+                "analysis": analysis,
+                "model": model,
+                "prompt": prompt
+            }
+            
+        except Exception as e:
+            result = {
+                "analysis": f"Vision analysis error: {str(e)}",
+                "model": model,
+                "prompt": prompt
+            }
+        
+        # Save to job history
+        try:
+            from enhanced_job_manager import JobType as EnhancedJobType
+            job_id = job_manager.create_and_complete_job_sync(
+                EnhancedJobType.PROJECTION,  # Using projection type for now
+                "Vision Analysis",
+                data,
+                result
+            )
+        except (ImportError, AttributeError):
+            job_id = job_manager.create_and_complete_job(
+                JobType.PROJECTION,
+                "Vision Analysis", 
                 data,
                 result
             )
@@ -641,7 +710,16 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         
-        html = """<!DOCTYPE html>
+        # Generate language options for translation
+        language_options = ""
+        for category, languages in LANGUAGE_HIERARCHY.items():
+            language_options += f'<optgroup label="{category}">\n'
+            for name, code in languages.items():
+                selected = 'selected' if code == 'es' else ''
+                language_options += f'    <option value="{code}" {selected}>{name}</option>\n'
+            language_options += '</optgroup>\n'
+        
+        html = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>Lamish Projection Engine</title>
@@ -736,6 +814,7 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                     <a class="nav-link active" href="#projection">Projection</a>
                     <a class="nav-link" href="#maieutic">Maieutic Dialogue</a>
                     <a class="nav-link" href="#translation">Round-trip Translation</a>
+                    <a class="nav-link" href="#vision">Vision Analysis</a>
                     <a class="nav-link" href="#management">Manage Assets</a>
                 </nav>
             </div>
@@ -874,10 +953,7 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                             <div class="col-md-6">
                                 <label for="intermediate-language" class="form-label">Intermediate Language</label>
                                 <select class="form-control" id="intermediate-language">
-                                    <option value="spanish">Spanish</option>
-                                    <option value="french">French</option>
-                                    <option value="german">German</option>
-                                    <option value="chinese">Chinese</option>
+                                    {language_options}
                                 </select>
                             </div>
                         </div>
@@ -890,6 +966,38 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                     </form>
                     
                     <div id="translation-result" class="mt-4" style="display: none;"></div>
+                </div>
+                
+                <!-- Vision Analysis Tab -->
+                <div id="vision" class="tab-content" style="display: none;">
+                    <h2>Vision Analysis with Gemini Pro</h2>
+                    <form id="vision-form">
+                        <div class="mb-3">
+                            <label for="vision-prompt" class="form-label">Analysis Prompt</label>
+                            <textarea class="form-control" id="vision-prompt" rows="3" 
+                                     placeholder="Describe what you want to analyze in the image...">What do you see in this image? Please provide a detailed description.</textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="vision-image" class="form-label">Upload Image</label>
+                            <input type="file" class="form-control" id="vision-image" accept="image/*">
+                        </div>
+                        <div class="mb-3">
+                            <label for="vision-model" class="form-label">Vision Model</label>
+                            <select class="form-control" id="vision-model">
+                                <option value="gemini-pro-vision">Gemini Pro Vision</option>
+                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</option>
+                            </select>
+                        </div>
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">
+                                <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
+                                Analyze Image
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div id="vision-result" class="mt-4" style="display: none;"></div>
                 </div>
                 
                 <!-- Management Tab -->
@@ -1249,6 +1357,73 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                     alert('Error: ' + (xhr.responseJSON?.detail || 'Unknown error'));
                 }
             });
+        });
+        
+        // Vision form
+        $('#vision-form').submit(function(e) {
+            e.preventDefault();
+            const button = $(this).find('button[type="submit"]');
+            const fileInput = document.getElementById('vision-image');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image file.');
+                return;
+            }
+            
+            showSpinner(button);
+            
+            // Convert image to base64
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64Data = e.target.result.split(',')[1]; // Remove data:image/... prefix
+                
+                const data = {
+                    prompt: $('#vision-prompt').val(),
+                    model: $('#vision-model').val(),
+                    image_data: base64Data
+                };
+                
+                $.ajax({
+                    url: '/api/vision/analyze',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        hideSpinner(button);
+                        if (response.success && response.result) {
+                            const result = response.result;
+                            const fullText = `# Vision Analysis\n\n## Prompt\n${data.prompt}\n\n## Analysis\n${result.analysis}\n\n*Model: ${data.model}*`;
+                            
+                            $('#vision-result').html(wrapWithActions(`
+                                <div class="result">
+                                    <h4>Vision Analysis Result</h4>
+                                    <div class="mb-3">
+                                        <strong>Model:</strong> ${data.model}
+                                    </div>
+                                    <div class="mb-3">
+                                        <strong>Prompt:</strong>
+                                        <div class="markdown-content">${renderMarkdown(data.prompt)}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <strong>Analysis:</strong>
+                                        <div class="markdown-content">${renderMarkdown(result.analysis)}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <strong>Uploaded Image:</strong><br>
+                                        <img src="data:image/jpeg;base64,${data.image_data}" class="img-fluid" style="max-width: 400px; border-radius: 8px;">
+                                    </div>
+                                </div>
+                            `, fullText)).show();
+                        }
+                    },
+                    error: function(xhr) {
+                        hideSpinner(button);
+                        alert('Error: ' + (xhr.responseJSON?.detail || 'Unknown error'));
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
         });
         
         // Generation Modal Functions
