@@ -415,6 +415,10 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             self.handle_translation_immediate(data)
         elif path == '/api/vision/analyze':
             self.handle_vision_immediate(data)
+        elif path == '/api/vision/transcribe':
+            self.handle_transcription_immediate(data)
+        elif path == '/api/vision/redraw':
+            self.handle_redraw_immediate(data)
         elif path == '/api/maieutic/start':
             self.handle_maieutic_immediate(data)
         elif path == '/api/maieutic/synthesize':
@@ -564,6 +568,152 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             )
         
         # Return immediate results
+        response = {
+            "success": True,
+            "job_id": job_id,
+            "result": result
+        }
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def handle_transcription_immediate(self, data):
+        """Process handwriting transcription with optimized prompt."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        # Extract data
+        prompt = data.get('prompt', '')
+        model = data.get('model', 'gemini-2.5-pro')
+        image_data = data.get('image_data', '')
+        
+        # Process using Google provider with vision
+        try:
+            google_provider = llm_manager.get_provider('google')
+            if not google_provider or not google_provider.available:
+                raise Exception("Google provider not available or API key not configured")
+            
+            if model not in google_provider.get_vision_models():
+                raise Exception(f"Model {model} does not support vision")
+            
+            # Generate transcription
+            analysis = google_provider.generate_text(
+                prompt, 
+                model=model, 
+                image_data=image_data
+            )
+            
+            result = {
+                "analysis": analysis,
+                "transcription": analysis,
+                "model": model,
+                "prompt": prompt,
+                "mode": "transcription"
+            }
+            
+        except Exception as e:
+            print(f"Transcription error: {str(e)}")
+            result = {
+                "analysis": f"Transcription error: {str(e)}",
+                "model": model,
+                "prompt": prompt,
+                "mode": "transcription"
+            }
+        
+        # Save to job history
+        try:
+            from enhanced_job_manager import JobType as EnhancedJobType
+            job_id = job_manager.create_and_complete_job_sync(
+                EnhancedJobType.PROJECTION,
+                "Handwriting Transcription",
+                data,
+                result
+            )
+        except (ImportError, AttributeError):
+            job_id = job_manager.create_and_complete_job(
+                JobType.PROJECTION,
+                "Handwriting Transcription",
+                data,
+                result
+            )
+        
+        response = {
+            "success": True,
+            "job_id": job_id,
+            "result": result
+        }
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def handle_redraw_immediate(self, data):
+        """Process image description and artistic redraw."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        # Extract data
+        prompt = data.get('prompt', '')
+        model = data.get('model', 'gemini-2.5-pro')
+        image_data = data.get('image_data', '')
+        persona = data.get('persona', 'artist')
+        namespace = data.get('namespace', 'modern-art')
+        style = data.get('style', 'detailed')
+        
+        # Process using Google provider with vision
+        try:
+            google_provider = llm_manager.get_provider('google')
+            if not google_provider or not google_provider.available:
+                raise Exception("Google provider not available or API key not configured")
+            
+            if model not in google_provider.get_vision_models():
+                raise Exception(f"Model {model} does not support vision")
+            
+            # Generate artistic analysis
+            analysis = google_provider.generate_text(
+                prompt, 
+                model=model, 
+                image_data=image_data
+            )
+            
+            result = {
+                "analysis": analysis,
+                "model": model,
+                "prompt": prompt,
+                "persona": persona,
+                "namespace": namespace,
+                "style": style,
+                "mode": "redraw"
+            }
+            
+        except Exception as e:
+            print(f"Redraw error: {str(e)}")
+            result = {
+                "analysis": f"Redraw analysis error: {str(e)}",
+                "model": model,
+                "prompt": prompt,
+                "persona": persona,
+                "namespace": namespace,
+                "style": style,
+                "mode": "redraw"
+            }
+        
+        # Save to job history
+        try:
+            from enhanced_job_manager import JobType as EnhancedJobType
+            job_id = job_manager.create_and_complete_job_sync(
+                EnhancedJobType.PROJECTION,
+                "Image Redraw Analysis",
+                data,
+                result
+            )
+        except (ImportError, AttributeError):
+            job_id = job_manager.create_and_complete_job(
+                JobType.PROJECTION,
+                "Image Redraw Analysis",
+                data,
+                result
+            )
+        
         response = {
             "success": True,
             "job_id": job_id,
@@ -793,6 +943,110 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             z-index: 2000;
             display: none;
         }
+        
+        /* Vision Mode Styles */
+        .vision-mode-active { 
+            background-color: #007cba !important; 
+            color: white !important; 
+            border-color: #007cba !important; 
+        }
+        
+        /* Comparison Modal Styles */
+        .comparison-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.9);
+            z-index: 3000;
+            display: none;
+        }
+        .comparison-content {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            position: relative;
+        }
+        .comparison-left {
+            width: 50%;
+            padding: 20px;
+            background: #1a1a1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+        }
+        .comparison-right {
+            width: 50%;
+            padding: 20px;
+            background: #2a2a2a;
+            color: white;
+            overflow-y: auto;
+        }
+        .comparison-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+        .comparison-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 3001;
+        }
+        .comparison-close:hover {
+            background: #c82333;
+        }
+        
+        /* Editable Transcription Styles */
+        .transcription-text {
+            background: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            min-height: 200px;
+        }
+        .editable-word {
+            cursor: pointer;
+            border-bottom: 1px dotted #007cba;
+            position: relative;
+        }
+        .editable-word:hover {
+            background: rgba(0, 123, 186, 0.2);
+        }
+        .word-confidence-low {
+            background: rgba(255, 193, 7, 0.3);
+        }
+        .word-confidence-medium {
+            background: rgba(255, 193, 7, 0.2);
+        }
+        .edit-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #007cba;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -800,6 +1054,42 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
     
     <!-- Copy feedback -->
     <div id="copy-feedback" class="copy-feedback">Copied to clipboard!</div>
+    
+    <!-- Comparison Modal -->
+    <div id="comparison-modal" class="comparison-modal">
+        <div class="comparison-content">
+            <button class="comparison-close" onclick="closeComparisonModal()">×</button>
+            <div class="comparison-left">
+                <img id="comparison-image" class="comparison-image" src="" alt="Uploaded image">
+            </div>
+            <div class="comparison-right">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 id="comparison-title">Transcription</h4>
+                    <div>
+                        <button class="btn btn-sm btn-outline-light me-2" onclick="saveTranscription()">💾 Save</button>
+                        <button class="btn btn-sm btn-outline-light me-2" onclick="copyTranscription()">📋 Copy</button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="toggleEditMode()">✏️ Edit</button>
+                    </div>
+                </div>
+                <div id="transcription-display" class="transcription-text"></div>
+                <div id="transcription-edit" style="display: none;">
+                    <textarea class="form-control transcription-text" id="transcription-editor" rows="20"></textarea>
+                    <div class="mt-3">
+                        <button class="btn btn-success me-2" onclick="saveEdit()">Save Changes</button>
+                        <button class="btn btn-secondary" onclick="cancelEdit()">Cancel</button>
+                    </div>
+                </div>
+                <div id="transcription-metadata" class="mt-3">
+                    <small class="text-muted">
+                        <div>Model: <span id="transcription-model-used">-</span></div>
+                        <div>Original created: <span id="transcription-original-time">-</span></div>
+                        <div>Last edited: <span id="transcription-edit-time">-</span></div>
+                        <div>Confidence: <span id="transcription-confidence">-</span></div>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <div class="container-fluid">
         <div class="row">
@@ -971,33 +1261,113 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                 
                 <!-- Vision Analysis Tab -->
                 <div id="vision" class="tab-content" style="display: none;">
-                    <h2>Vision Analysis with Gemini Pro</h2>
-                    <form id="vision-form">
-                        <div class="mb-3">
-                            <label for="vision-prompt" class="form-label">Analysis Prompt</label>
-                            <textarea class="form-control" id="vision-prompt" rows="3" 
-                                     placeholder="Describe what you want to analyze in the image...">What do you see in this image? Please provide a detailed description.</textarea>
-                        </div>
-                        <div class="mb-3">
-                            <label for="vision-image" class="form-label">Upload Image</label>
-                            <input type="file" class="form-control" id="vision-image" accept="image/*">
-                        </div>
-                        <div class="mb-3">
-                            <label for="vision-model" class="form-label">Vision Model</label>
-                            <select class="form-control" id="vision-model">
-                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Latest)</option>
-                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                            </select>
-                        </div>
-                        <div class="mt-3">
-                            <button type="submit" class="btn btn-primary">
-                                <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
-                                Analyze Image
+                    <h2>Vision Analysis with Gemini 2.5 Pro</h2>
+                    
+                    <!-- Image Upload Section -->
+                    <div class="mb-4">
+                        <label for="vision-image" class="form-label">Upload Image</label>
+                        <input type="file" class="form-control" id="vision-image" accept="image/*">
+                        <div class="form-text">Supported formats: JPG, PNG, GIF, WebP</div>
+                    </div>
+                    
+                    <!-- Vision Mode Buttons -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <button type="button" class="btn btn-outline-primary w-100 h-100" id="transcription-mode-btn" onclick="setVisionMode('transcription')">
+                                <div class="p-3">
+                                    <h5>📝 Handwriting Transcription</h5>
+                                    <p class="mb-0 small">Optimized for transcribing handwritten notes with paragraph formatting and editing capabilities</p>
+                                </div>
                             </button>
                         </div>
-                    </form>
+                        <div class="col-md-6">
+                            <button type="button" class="btn btn-outline-secondary w-100 h-100" id="redraw-mode-btn" onclick="setVisionMode('redraw')">
+                                <div class="p-3">
+                                    <h5>🎨 Describe & Redraw</h5>
+                                    <p class="mb-0 small">Analyze image and create artistic reinterpretation through personas and styles</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Transcription Mode Form -->
+                    <div id="transcription-form" style="display: none;">
+                        <form id="vision-transcription-form">
+                            <div class="mb-3">
+                                <label for="transcription-model" class="form-label">Transcription Model</label>
+                                <select class="form-control" id="transcription-model">
+                                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Highest Accuracy)</option>
+                                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Faster)</option>
+                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="preserve-formatting" checked>
+                                    <label class="form-check-label" for="preserve-formatting">
+                                        Preserve paragraph formatting (detect indents and empty lines)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="probability-confidence" checked>
+                                    <label class="form-check-label" for="probability-confidence">
+                                        Include confidence levels for uncertain words
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
+                                Transcribe Handwriting
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Redraw Mode Form -->
+                    <div id="redraw-form" style="display: none;">
+                        <form id="vision-redraw-form">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="redraw-persona" class="form-label">Persona</label>
+                                    <select class="form-control" id="redraw-persona">
+                                        <option value="artist">Artist</option>
+                                        <option value="photographer">Photographer</option>
+                                        <option value="designer">Designer</option>
+                                        <option value="storyteller">Storyteller</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="redraw-namespace" class="form-label">Namespace</label>
+                                    <select class="form-control" id="redraw-namespace">
+                                        <option value="modern-art">Modern Art</option>
+                                        <option value="classical">Classical</option>
+                                        <option value="surreal">Surreal</option>
+                                        <option value="photorealistic">Photorealistic</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="redraw-style" class="form-label">Style</label>
+                                    <select class="form-control" id="redraw-style">
+                                        <option value="detailed">Detailed Description</option>
+                                        <option value="impressionistic">Impressionistic</option>
+                                        <option value="technical">Technical Analysis</option>
+                                        <option value="poetic">Poetic Interpretation</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <label for="redraw-model" class="form-label">Analysis Model</label>
+                                <select class="form-control" id="redraw-model">
+                                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Best Quality)</option>
+                                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-secondary mt-3">
+                                <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
+                                Describe & Redraw
+                            </button>
+                        </form>
+                    </div>
                     
                     <div id="vision-result" class="mt-4" style="display: none;"></div>
                 </div>
@@ -1361,8 +1731,33 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             });
         });
         
-        // Vision form
-        $('#vision-form').submit(function(e) {
+        // Vision mode selection
+        let currentVisionMode = null;
+        let currentImageData = null;
+        let originalTranscription = null;
+        let editedTranscription = null;
+        
+        function setVisionMode(mode) {
+            currentVisionMode = mode;
+            
+            // Update button styles
+            $('#transcription-mode-btn').removeClass('vision-mode-active btn-primary').addClass('btn-outline-primary');
+            $('#redraw-mode-btn').removeClass('vision-mode-active btn-secondary').addClass('btn-outline-secondary');
+            
+            // Hide all forms
+            $('#transcription-form, #redraw-form').hide();
+            
+            if (mode === 'transcription') {
+                $('#transcription-mode-btn').removeClass('btn-outline-primary').addClass('btn-primary vision-mode-active');
+                $('#transcription-form').show();
+            } else if (mode === 'redraw') {
+                $('#redraw-mode-btn').removeClass('btn-outline-secondary').addClass('btn-secondary vision-mode-active');
+                $('#redraw-form').show();
+            }
+        }
+        
+        // Transcription form handler
+        $('#vision-transcription-form').submit(function(e) {
             e.preventDefault();
             const button = $(this).find('button[type="submit"]');
             const fileInput = document.getElementById('vision-image');
@@ -1378,16 +1773,122 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             // Convert image to base64
             const reader = new FileReader();
             reader.onload = function(e) {
-                const base64Data = e.target.result.split(',')[1]; // Remove data:image/... prefix
+                currentImageData = e.target.result;
+                const base64Data = currentImageData.split(',')[1]; // Remove data:image/... prefix
+                
+                // Build optimized transcription prompt
+                const preserveFormatting = $('#preserve-formatting').is(':checked');
+                const includeConfidence = $('#probability-confidence').is(':checked');
+                
+                let prompt = `Please transcribe all handwritten text in this image with high accuracy. Follow these specific rules:
+
+1. TRANSCRIPTION ACCURACY:
+   - Use literal spelling from the image, even for unusual names or terms
+   - Include all visible text, including partial words or fragments
+   - Mark clearly illegible words with [?] 
+   
+2. PARAGRAPH FORMATTING:`;
+                
+                if (preserveFormatting) {
+                    prompt += `
+   - Detect paragraph breaks from indentation or empty lines
+   - Insert double line breaks (\\n\\n) between paragraphs
+   - Preserve list formatting with line breaks for short list items
+   - Maintain original line structure for obvious formatting`;
+                } else {
+                    prompt += `
+   - Present as continuous text without special formatting`;
+                }
+                
+                if (includeConfidence) {
+                    prompt += `
+
+3. CONFIDENCE INDICATORS:
+   - Mark uncertain words with confidence levels: [word?] for low confidence, [word??] for very uncertain
+   - Provide overall transcription confidence percentage at the end`;
+                }
+                
+                prompt += `
+
+4. OUTPUT FORMAT:
+   - Provide the clean transcription first
+   - Then list any uncertain words with alternatives if applicable
+   
+Begin transcription:`;
                 
                 const data = {
-                    prompt: $('#vision-prompt').val(),
-                    model: $('#vision-model').val(),
-                    image_data: base64Data
+                    prompt: prompt,
+                    model: $('#transcription-model').val(),
+                    image_data: base64Data,
+                    mode: 'transcription'
                 };
                 
                 $.ajax({
-                    url: '/api/vision/analyze',
+                    url: '/api/vision/transcribe',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        hideSpinner(button);
+                        if (response.success && response.result) {
+                            originalTranscription = response.result;
+                            showComparisonModal(currentImageData, response.result, data.model);
+                        }
+                    },
+                    error: function(xhr) {
+                        hideSpinner(button);
+                        alert('Error: ' + (xhr.responseJSON?.detail || 'Unknown error'));
+                    }
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+        
+        // Redraw form handler  
+        $('#vision-redraw-form').submit(function(e) {
+            e.preventDefault();
+            const button = $(this).find('button[type="submit"]');
+            const fileInput = document.getElementById('vision-image');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image file.');
+                return;
+            }
+            
+            showSpinner(button);
+            
+            // Convert image to base64
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64Data = e.target.result.split(',')[1];
+                
+                const persona = $('#redraw-persona').val();
+                const namespace = $('#redraw-namespace').val();
+                const style = $('#redraw-style').val();
+                
+                const prompt = `As a ${persona} working in the ${namespace} context with a ${style} approach, analyze this image and create a detailed description that could be used to recreate or reinterpret it artistically.
+
+Please provide:
+1. Detailed visual analysis of the image
+2. Artistic interpretation through your ${persona} perspective
+3. Creative reimagining in the ${namespace} style
+4. Technical notes for artistic recreation
+
+Focus on capturing both the literal elements and the artistic essence that could inspire a new work.`;
+                
+                const data = {
+                    prompt: prompt,
+                    model: $('#redraw-model').val(),
+                    image_data: base64Data,
+                    persona: persona,
+                    namespace: namespace,
+                    style: style,
+                    mode: 'redraw'
+                };
+                
+                $.ajax({
+                    url: '/api/vision/redraw',
                     method: 'POST',
                     contentType: 'application/json',
                     data: JSON.stringify(data),
@@ -1395,25 +1896,24 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                         hideSpinner(button);
                         if (response.success && response.result) {
                             const result = response.result;
-                            const fullText = `# Vision Analysis\n\n## Prompt\n${data.prompt}\n\n## Analysis\n${result.analysis}\n\n*Model: ${data.model}*`;
+                            const fullText = `# Image Redraw Analysis\n\n## Persona: ${persona}\n## Namespace: ${namespace}\n## Style: ${style}\n\n## Analysis\n${result.analysis}\n\n*Model: ${data.model}*`;
                             
                             $('#vision-result').html(wrapWithActions(`
                                 <div class="result">
-                                    <h4>Vision Analysis Result</h4>
+                                    <h4>Artistic Reinterpretation</h4>
+                                    <div class="mb-3">
+                                        <strong>Perspective:</strong> ${persona} | ${namespace} | ${style}
+                                    </div>
                                     <div class="mb-3">
                                         <strong>Model:</strong> ${data.model}
                                     </div>
                                     <div class="mb-3">
-                                        <strong>Prompt:</strong>
-                                        <div class="markdown-content">${renderMarkdown(data.prompt)}</div>
-                                    </div>
-                                    <div class="mb-3">
-                                        <strong>Analysis:</strong>
+                                        <strong>Analysis & Recreation Guide:</strong>
                                         <div class="markdown-content">${renderMarkdown(result.analysis)}</div>
                                     </div>
                                     <div class="mb-3">
-                                        <strong>Uploaded Image:</strong><br>
-                                        <img src="data:image/jpeg;base64,${data.image_data}" class="img-fluid" style="max-width: 400px; border-radius: 8px;">
+                                        <strong>Original Image:</strong><br>
+                                        <img src="${e.target.result}" class="img-fluid" style="max-width: 400px; border-radius: 8px;">
                                     </div>
                                 </div>
                             `, fullText)).show();
@@ -1427,6 +1927,193 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             };
             reader.readAsDataURL(file);
         });
+        
+        // Comparison Modal Functions
+        function showComparisonModal(imageData, transcriptionResult, model) {
+            // Set image
+            document.getElementById('comparison-image').src = imageData;
+            
+            // Set transcription
+            const displayElement = document.getElementById('transcription-display');
+            const transcriptionText = transcriptionResult.analysis || transcriptionResult.transcription || transcriptionResult;
+            
+            // Make words editable if it's a transcription
+            const editableText = makeWordsEditable(transcriptionText);
+            displayElement.innerHTML = editableText;
+            
+            // Set metadata
+            document.getElementById('transcription-model-used').textContent = model;
+            document.getElementById('transcription-original-time').textContent = new Date().toLocaleString();
+            document.getElementById('transcription-edit-time').textContent = 'Not edited';
+            
+            // Extract confidence if present
+            const confidenceMatch = transcriptionText.match(/confidence[:\s]+(\d+(?:\.\d+)?%?)/i);
+            document.getElementById('transcription-confidence').textContent = confidenceMatch ? confidenceMatch[1] : 'Not specified';
+            
+            // Show modal
+            document.getElementById('comparison-modal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeComparisonModal() {
+            document.getElementById('comparison-modal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+        
+        function makeWordsEditable(text) {
+            // Split text into words while preserving whitespace and punctuation
+            return text.replace(/(\S+)/g, function(word, match) {
+                const isUncertain = word.includes('[') && word.includes('?');
+                const confidenceClass = isUncertain ? (word.includes('??') ? 'word-confidence-low' : 'word-confidence-medium') : '';
+                return `<span class="editable-word ${confidenceClass}" data-original="${match}" onclick="editWord(this)">${match}</span>`;
+            });
+        }
+        
+        function editWord(element) {
+            const currentText = element.textContent;
+            const originalText = element.getAttribute('data-original');
+            
+            // Create inline editor
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentText;
+            input.className = 'form-control d-inline-block';
+            input.style.width = Math.max(currentText.length * 8 + 20, 60) + 'px';
+            input.style.fontSize = 'inherit';
+            input.style.fontFamily = 'inherit';
+            input.style.display = 'inline-block';
+            input.style.margin = '0 2px';
+            
+            // Replace element with input
+            element.parentNode.replaceChild(input, element);
+            input.focus();
+            input.select();
+            
+            // Handle save/cancel
+            function saveEdit() {
+                const newSpan = document.createElement('span');
+                newSpan.className = element.className;
+                newSpan.setAttribute('data-original', originalText);
+                newSpan.textContent = input.value;
+                newSpan.onclick = function() { editWord(this); };
+                
+                // Mark as edited if changed
+                if (input.value !== originalText) {
+                    newSpan.classList.add('word-edited');
+                    newSpan.style.backgroundColor = 'rgba(40, 167, 69, 0.2)';
+                    newSpan.setAttribute('data-edited', 'true');
+                }
+                
+                input.parentNode.replaceChild(newSpan, input);
+            }
+            
+            function cancelEdit() {
+                element.parentNode.replaceChild(element, input);
+            }
+            
+            input.addEventListener('blur', saveEdit);
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    saveEdit();
+                } else if (e.key === 'Escape') {
+                    cancelEdit();
+                }
+            });
+        }
+        
+        function toggleEditMode() {
+            const displayElement = document.getElementById('transcription-display');
+            const editElement = document.getElementById('transcription-edit');
+            const editorElement = document.getElementById('transcription-editor');
+            
+            if (editElement.style.display === 'none') {
+                // Switch to edit mode
+                editorElement.value = displayElement.textContent || displayElement.innerText;
+                displayElement.style.display = 'none';
+                editElement.style.display = 'block';
+            } else {
+                // Switch back to display mode
+                displayElement.style.display = 'block';
+                editElement.style.display = 'none';
+            }
+        }
+        
+        function saveEdit() {
+            const editorElement = document.getElementById('transcription-editor');
+            const displayElement = document.getElementById('transcription-display');
+            
+            const newText = editorElement.value;
+            editedTranscription = newText;
+            
+            // Update display with editable words
+            displayElement.innerHTML = makeWordsEditable(newText);
+            
+            // Update metadata
+            document.getElementById('transcription-edit-time').textContent = new Date().toLocaleString();
+            
+            // Switch back to display mode
+            toggleEditMode();
+            
+            showFeedback('Transcription updated successfully');
+        }
+        
+        function cancelEdit() {
+            toggleEditMode();
+        }
+        
+        function copyTranscription() {
+            const displayElement = document.getElementById('transcription-display');
+            const text = displayElement.textContent || displayElement.innerText;
+            
+            navigator.clipboard.writeText(text).then(function() {
+                showFeedback('Transcription copied to clipboard');
+            });
+        }
+        
+        function saveTranscription() {
+            const displayElement = document.getElementById('transcription-display');
+            const text = displayElement.textContent || displayElement.innerText;
+            const model = document.getElementById('transcription-model-used').textContent;
+            const timestamp = new Date().toISOString().slice(0,19).replace(/:/g,'-');
+            
+            const content = `# Handwriting Transcription
+            
+## Original Transcription
+${originalTranscription?.analysis || originalTranscription || 'Not available'}
+
+## Current Version
+${text}
+
+## Metadata
+- Model: ${model}
+- Original created: ${document.getElementById('transcription-original-time').textContent}
+- Last edited: ${document.getElementById('transcription-edit-time').textContent}
+- Confidence: ${document.getElementById('transcription-confidence').textContent}
+
+---
+*Generated by Lamish Projection Engine*`;
+            
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transcription_${timestamp}.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showFeedback('Transcription saved as markdown file');
+        }
+        
+        function showFeedback(message) {
+            const feedback = document.getElementById('copy-feedback');
+            feedback.textContent = message;
+            feedback.style.display = 'block';
+            setTimeout(() => {
+                feedback.style.display = 'none';
+            }, 2000);
+        }
         
         // Generation Modal Functions
         let currentGenerationType = '';
