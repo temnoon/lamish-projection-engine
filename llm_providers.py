@@ -138,9 +138,9 @@ class GoogleProvider(LLMProvider):
     def __init__(self):
         super().__init__("google")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-        self.default_model = "gemini-pro"
-        self.models = ["gemini-pro", "gemini-pro-vision", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
-        self.vision_models = ["gemini-pro-vision", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+        self.default_model = "gemini-2.5-pro"
+        self.models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+        self.vision_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
     
     def generate_text(self, prompt: str, model: str = None, temperature: float = 0.7, max_tokens: int = 4096, image_data: str = None) -> str:
         """Generate text using Google Gemini API with optional vision support."""
@@ -178,7 +178,56 @@ class GoogleProvider(LLMProvider):
             response = urllib.request.urlopen(req, timeout=120)
             result = json.loads(response.read().decode())
             
-            return result['candidates'][0]['content']['parts'][0]['text']
+            # Extract response text (handle thinking models)
+            candidate = result['candidates'][0]
+            content = candidate.get('content', {})
+            
+            if 'parts' in content and content['parts']:
+                response_text = content['parts'][0]['text']
+            else:
+                # For thinking models that might not have visible output
+                response_text = f"[Model finished with reason: {candidate.get('finishReason', 'UNKNOWN')}]"
+                if 'usageMetadata' in result and 'thoughtsTokenCount' in result['usageMetadata']:
+                    thoughts_tokens = result['usageMetadata']['thoughtsTokenCount']
+                    response_text += f" (Used {thoughts_tokens} thinking tokens)"
+            
+            # Calculate token usage for metering using actual API counts
+            try:
+                from token_meter import token_meter, estimate_image_tokens
+                
+                # Get actual token counts from API response if available
+                usage_metadata = result.get('usageMetadata', {})
+                if usage_metadata:
+                    input_tokens = usage_metadata.get('promptTokenCount', 0)
+                    # For output, use totalTokenCount - promptTokenCount
+                    total_tokens = usage_metadata.get('totalTokenCount', 0)
+                    output_tokens = max(0, total_tokens - input_tokens)
+                    thoughts_tokens = usage_metadata.get('thoughtsTokenCount', 0)
+                else:
+                    # Fallback to estimation
+                    input_tokens = max(1, len(prompt) // 4)
+                    output_tokens = max(1, len(response_text) // 4)
+                    thoughts_tokens = 0
+                
+                image_tokens = estimate_image_tokens(image_data) if image_data else 0
+                
+                # Log usage
+                usage = token_meter.log_usage(
+                    provider="google",
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    image_tokens=image_tokens,
+                    request_type="vision" if image_data else "text"
+                )
+                
+                thinking_info = f", {thoughts_tokens} thinking" if thoughts_tokens else ""
+                print(f"💰 Token usage: {input_tokens} input, {output_tokens} output{thinking_info}, ${usage['cost']:.4f}")
+                
+            except ImportError:
+                pass  # Token metering not available
+            
+            return response_text
         except Exception as e:
             raise Exception(f"Google API error: {str(e)}")
     

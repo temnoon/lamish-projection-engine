@@ -539,8 +539,9 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             }
             
         except Exception as e:
+            print(f"Vision analysis error: {str(e)}")  # Debug logging
             result = {
-                "analysis": f"Vision analysis error: {str(e)}",
+                "analysis": f"Vision analysis error: {str(e)}. Model: {model}, API URL: {google_provider.base_url if google_provider else 'N/A'}",
                 "model": model,
                 "prompt": prompt
             }
@@ -984,9 +985,10 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                         <div class="mb-3">
                             <label for="vision-model" class="form-label">Vision Model</label>
                             <select class="form-control" id="vision-model">
-                                <option value="gemini-pro-vision">Gemini Pro Vision</option>
+                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Latest)</option>
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                                 <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</option>
+                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                             </select>
                         </div>
                         <div class="mt-3">

@@ -28,7 +28,7 @@ class MultiLLMAdmin:
             "default_provider": "ollama",
             "provider_settings": {
                 "openai": {
-                    "default_model": "gpt-4",
+                    "default_model": "gpt-4o",
                     "temperature": 0.7,
                     "max_tokens": 4096,
                     "timeout": 120

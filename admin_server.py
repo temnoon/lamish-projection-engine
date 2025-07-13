@@ -382,7 +382,7 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
                         📝 Input
                     </span>
                     {' | ' if job.result_data else ''}
-                    {'<span class="clickable-content" onclick="showModal(\\'Result Data - ' + job.title + '\\', \\'' + result_data_escaped + '\\', \\'json\\')" title="Click to view result data">📊 Result</span>' if job.result_data else ''}
+                    {('<span class="clickable-content" onclick="showModal(\'Result Data - ' + job.title + '\', \'' + result_data_escaped + '\', \'json\')" title="Click to view result data">📊 Result</span>') if job.result_data else ''}
                 </td>
             </tr>"""
             
