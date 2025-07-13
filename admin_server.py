@@ -367,8 +367,10 @@ class AdminHandler(http.server.BaseHTTPRequestHandler):
             for job in jobs[:15]:
                 status_class = f"status-{job.status.value}"
                 # Escape JSON data for HTML attributes
-                input_data_escaped = job.input_data.replace('"', '&quot;').replace("'", '&#39;')
-                result_data_escaped = job.result_data.replace('"', '&quot;').replace("'", '&#39;')
+                input_data_str = json.dumps(job.input_data) if isinstance(job.input_data, dict) else str(job.input_data)
+                result_data_str = json.dumps(job.result_data) if isinstance(job.result_data, dict) else str(job.result_data)
+                input_data_escaped = input_data_str.replace('"', '&quot;').replace("'", '&#39;')
+                result_data_escaped = result_data_str.replace('"', '&quot;').replace("'", '&#39;')
                 
                 html += f"""
             <tr>

@@ -193,21 +193,27 @@ Explain how this {namespace} version illuminates the original narrative about: {
             }
         
         try:
-            # Forward translation using direct generate API
-            forward_prompt = f"You are a professional translator. Translate this text to {intermediate_language}: {text}"
-            forward_result = self._generate_request(self.model, forward_prompt)
+            # Import get_language_name function
+            from language_config import get_language_name
             
-            # Backward translation using direct generate API
-            backward_prompt = f"You are a professional translator. Translate this {intermediate_language} text back to English: {forward_result}"
-            backward_result = self._generate_request(self.model, backward_prompt)
+            # Get full language name from code
+            language_name = get_language_name(intermediate_language)
             
-            # Analysis using direct generate API
+            # Forward translation using current model
+            forward_prompt = f"You are a professional translator. Translate this text to {language_name}: {text}"
+            forward_result = self._generate_request(self.current_model, forward_prompt)
+            
+            # Backward translation using current model
+            backward_prompt = f"You are a professional translator. Translate this {language_name} text back to English: {forward_result}"
+            backward_result = self._generate_request(self.current_model, backward_prompt)
+            
+            # Analysis using current model
             analysis_prompt = f"""You are a linguistic analyst. Compare these texts for semantic drift:
 Original: {text}
 After round-trip: {backward_result}
 
 Analyze what was preserved, lost, or gained in the translation."""
-            analysis = self._generate_request(self.model, analysis_prompt)
+            analysis = self._generate_request(self.current_model, analysis_prompt)
             
             return {
                 "original_text": text,
@@ -220,9 +226,11 @@ Analyze what was preserved, lost, or gained in the translation."""
                 "analysis": analysis
             }
         except Exception as e:
+            print(f"Translation error: {str(e)}")
             return {
                 "original_text": text,
                 "final_text": f"Translation error: {str(e)}",
+                "intermediate_text": "Translation failed",
                 "analysis": "Translation failed - please check LLM connection"
             }
     
@@ -392,11 +400,41 @@ print("Available at: http://localhost:8000")
 
 class ImmediateHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if urlparse(self.path).path == '/':
+        parsed_path = urlparse(self.path)
+        if parsed_path.path == '/':
             self.serve_main_interface()
+        elif parsed_path.path.startswith('/generated_images/'):
+            self.serve_generated_image(parsed_path.path)
         else:
             self.send_response(404)
             self.end_headers()
+    
+    def serve_generated_image(self, path):
+        """Serve generated images from the local directory."""
+        from pathlib import Path
+        import mimetypes
+        
+        # Extract filename from path
+        filename = path.split('/')[-1]
+        filepath = Path.home() / ".lpe" / "generated_images" / filename
+        
+        if not filepath.exists():
+            self.send_response(404)
+            self.end_headers()
+            return
+        
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(str(filepath))
+        if content_type is None:
+            content_type = 'application/octet-stream'
+        
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(filepath.stat().st_size))
+        self.end_headers()
+        
+        with open(filepath, 'rb') as f:
+            self.wfile.write(f.read())
     
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -409,9 +447,9 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
         
         path = urlparse(self.path).path
         
-        if path == '/api/projection/create':
+        if path == '/api/projection/create' or path == '/api/projection':
             self.handle_projection_immediate(data)
-        elif path == '/api/translation/round-trip':
+        elif path == '/api/translation/round-trip' or path == '/api/translation':
             self.handle_translation_immediate(data)
         elif path == '/api/vision/analyze':
             self.handle_vision_immediate(data)
@@ -427,6 +465,10 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             self.handle_namespace_generation(data)
         elif path == '/api/generate/persona':
             self.handle_persona_generation(data)
+        elif path == '/api/image/generate':
+            self.handle_image_generation(data)
+        elif path == '/api/image/proxy':
+            self.handle_image_proxy(data)
         else:
             self.send_response(404)
             self.end_headers()
@@ -477,37 +519,25 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         
+        print(f"🔄 Starting translation: {data.get('text', '')} -> {data.get('intermediate_language', 'spanish')}")
+        
         # Process immediately
         result = llm.generate_translation_analysis(
             data.get('text', ''),
             data.get('intermediate_language', 'spanish')
         )
         
-        # Save to job history with enhanced features
-        try:
-            from enhanced_job_manager import JobType as EnhancedJobType
-            job_id = job_manager.create_and_complete_job_sync(
-                EnhancedJobType.TRANSLATION,
-                "Translation Analysis",
-                data,
-                result
-            )
-        except (ImportError, AttributeError):
-            job_id = job_manager.create_and_complete_job(
-                JobType.TRANSLATION,
-                "Translation Analysis",
-                data,
-                result
-            )
+        print(f"✅ Translation result: {result}")
         
-        # Return immediate results
+        # Return immediate results (skip job manager for now)
         response = {
             "success": True,
-            "job_id": job_id,
             "result": result
         }
         
+        print(f"📤 Sending response: {len(json.dumps(response))} chars")
         self.wfile.write(json.dumps(response).encode())
+        print(f"✅ Response sent")
     
     def handle_vision_immediate(self, data):
         """Process vision analysis immediately and return results."""
@@ -668,11 +698,12 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             if model not in google_provider.get_vision_models():
                 raise Exception(f"Model {model} does not support vision")
             
-            # Generate artistic analysis
+            # Generate artistic analysis with higher token limit for detailed descriptions
             analysis = google_provider.generate_text(
                 prompt, 
                 model=model, 
-                image_data=image_data
+                image_data=image_data,
+                max_tokens=8192  # Increased token limit for detailed analysis
             )
             
             result = {
@@ -856,6 +887,188 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
         
         self.wfile.write(json.dumps(response).encode())
     
+    def handle_image_generation(self, data):
+        """Generate images using local OllamaDiffuser or OpenAI DALL-E."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        prompt = data.get('prompt', '')
+        provider = data.get('provider', 'ollamadiffuser')  # 'ollamadiffuser' or 'openai'
+        model = data.get('model', 'flux.1-schnell')
+        size = data.get('size', '1024x1024')
+        
+        if not prompt:
+            response = {"success": False, "error": "No prompt provided"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            if provider == 'ollamadiffuser':
+                # Try local OllamaDiffuser
+                image_url = self.generate_image_ollamadiffuser(prompt, model)
+            elif provider == 'openai':
+                # Use OpenAI DALL-E
+                image_url = self.generate_image_openai(prompt, size)
+            else:
+                raise Exception(f"Unknown image generation provider: {provider}")
+            
+            result = {
+                "image_url": image_url,
+                "prompt": prompt,
+                "provider": provider,
+                "model": model if provider == 'ollamadiffuser' else 'dall-e-3',
+                "size": size
+            }
+            
+            response = {
+                "success": True,
+                "result": result
+            }
+            
+        except Exception as e:
+            print(f"Image generation error: {str(e)}")
+            response = {
+                "success": False,
+                "error": str(e)
+            }
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def handle_image_proxy(self, data):
+        """Proxy an image URL to base64 to bypass CORS restrictions."""
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        image_url = data.get('url', '')
+        
+        if not image_url:
+            response = {"success": False, "error": "No image URL provided"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            import urllib.request
+            import base64
+            
+            # Fetch the image
+            with urllib.request.urlopen(image_url) as response_data:
+                image_bytes = response_data.read()
+                
+            # Convert to base64
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            image_data = f"data:image/png;base64,{base64_image}"
+            
+            response = {
+                "success": True,
+                "image_data": image_data
+            }
+            
+        except Exception as e:
+            print(f"Image proxy error: {str(e)}")
+            response = {
+                "success": False,
+                "error": str(e)
+            }
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def generate_image_ollamadiffuser(self, prompt, model):
+        """Generate image using local OllamaDiffuser."""
+        import urllib.request
+        import urllib.parse
+        import json
+        import base64
+        import os
+        from pathlib import Path
+        
+        # Check if OllamaDiffuser is running
+        try:
+            urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)
+        except:
+            raise Exception("OllamaDiffuser not running. Install with 'pip install ollamadiffuser' and run 'ollamadiffuser run " + model + "'")
+        
+        # Generate image
+        data = {
+            "prompt": prompt,
+            "model": model
+        }
+        
+        json_data = json.dumps(data).encode('utf-8')
+        req = urllib.request.Request('http://localhost:8000/api/generate', data=json_data)
+        req.add_header('Content-Type', 'application/json')
+        
+        response = urllib.request.urlopen(req, timeout=60)
+        result = json.loads(response.read().decode())
+        
+        if 'image' in result:
+            # Save image to local directory
+            images_dir = Path.home() / ".lpe" / "generated_images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"generated_{timestamp}.png"
+            filepath = images_dir / filename
+            
+            # Decode and save image
+            image_data = base64.b64decode(result['image'])
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            
+            return f"/generated_images/{filename}"
+        else:
+            raise Exception("No image returned from OllamaDiffuser")
+    
+    def generate_image_openai(self, prompt, size):
+        """Generate image using OpenAI DALL-E."""
+        openai_provider = llm_manager.get_provider('openai')
+        if not openai_provider or not openai_provider.available:
+            raise Exception("OpenAI provider not available or API key not configured")
+        
+        import urllib.request
+        import json
+        import base64
+        import os
+        from pathlib import Path
+        
+        # Call OpenAI Images API
+        url = "https://api.openai.com/v1/images/generations"
+        data = {
+            "model": "dall-e-3",
+            "prompt": prompt,
+            "size": size,
+            "quality": "standard",
+            "n": 1,
+            "response_format": "b64_json"
+        }
+        
+        json_data = json.dumps(data).encode('utf-8')
+        req = urllib.request.Request(url, data=json_data)
+        req.add_header('Content-Type', 'application/json')
+        req.add_header('Authorization', f'Bearer {openai_provider.api_key}')
+        
+        response = urllib.request.urlopen(req, timeout=60)
+        result = json.loads(response.read().decode())
+        
+        if result.get('data') and len(result['data']) > 0:
+            # Save image to local directory
+            images_dir = Path.home() / ".lpe" / "generated_images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"dalle_{timestamp}.png"
+            filepath = images_dir / filename
+            
+            # Decode and save image
+            image_data = base64.b64decode(result['data'][0]['b64_json'])
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            
+            return f"/generated_images/{filename}"
+        else:
+            raise Exception("No image returned from OpenAI DALL-E")
+    
     def serve_main_interface(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1018,6 +1231,69 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             line-height: 1.6;
             white-space: pre-wrap;
             min-height: 200px;
+        }
+        
+        /* Main Content Block Styles */
+        .main-content-block {
+            position: relative;
+            border: 2px solid #007cba;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            background: rgba(0, 123, 186, 0.05);
+        }
+        .main-content-block .content-header {
+            position: absolute;
+            top: -12px;
+            left: 15px;
+            background: #007cba;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .main-content-block .block-copy-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #007cba;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0.8;
+        }
+        .main-content-block .block-copy-btn:hover {
+            opacity: 1;
+            background: #005a8b;
+        }
+        .block-actions {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            display: flex;
+            gap: 5px;
+        }
+        .block-refine-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            opacity: 0.8;
+        }
+        .block-refine-btn:hover {
+            opacity: 1;
+            background: #218838;
+        }
+        .main-content-block:hover {
+            border-color: #005a8b;
+            box-shadow: 0 2px 8px rgba(0, 123, 186, 0.2);
         }
         .editable-word {
             cursor: pointer;
@@ -1272,7 +1548,7 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                     
                     <!-- Vision Mode Buttons -->
                     <div class="row mb-4">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <button type="button" class="btn btn-outline-primary w-100 h-100" id="transcription-mode-btn" onclick="setVisionMode('transcription')">
                                 <div class="p-3">
                                     <h5>📝 Handwriting Transcription</h5>
@@ -1280,11 +1556,19 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                                 </div>
                             </button>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <button type="button" class="btn btn-outline-secondary w-100 h-100" id="redraw-mode-btn" onclick="setVisionMode('redraw')">
                                 <div class="p-3">
                                     <h5>🎨 Describe & Redraw</h5>
                                     <p class="mb-0 small">Analyze image and create artistic reinterpretation through personas and styles</p>
+                                </div>
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="button" class="btn btn-outline-success w-100 h-100" id="generate-mode-btn" onclick="setVisionMode('generate')">
+                                <div class="p-3">
+                                    <h5>🖼️ Generate Image</h5>
+                                    <p class="mb-0 small">Create new images from text descriptions using local or cloud AI models</p>
                                 </div>
                             </button>
                         </div>
@@ -1365,6 +1649,50 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                             <button type="submit" class="btn btn-secondary mt-3">
                                 <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
                                 Describe & Redraw
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Generate Mode Form -->
+                    <div id="generate-form" style="display: none;">
+                        <form id="vision-generate-form">
+                            <div class="mb-3">
+                                <label for="generate-prompt" class="form-label">Image Description</label>
+                                <textarea class="form-control" id="generate-prompt" rows="3" placeholder="Describe the image you want to generate..."></textarea>
+                                <div class="form-text">Be specific about style, colors, composition, and mood</div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label for="generate-provider" class="form-label">Generation Method</label>
+                                    <select class="form-control" id="generate-provider" onchange="updateGenerateOptions()">
+                                        <option value="openai">Cloud (OpenAI DALL-E) - API Cost</option>
+                                        <option value="ollamadiffuser">Local (OllamaDiffuser) - Requires Python 3.10+</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6" id="local-model-options">
+                                    <label for="generate-model" class="form-label">Local Model</label>
+                                    <select class="form-control" id="generate-model">
+                                        <option value="flux.1-schnell">FLUX.1 Schnell (Fast)</option>
+                                        <option value="flux.1-dev">FLUX.1 Dev (High Quality)</option>
+                                        <option value="sd3.5-large">Stable Diffusion 3.5 Large</option>
+                                        <option value="sd1.5">Stable Diffusion 1.5</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6" id="cloud-size-options" style="display: none;">
+                                    <label for="generate-size" class="form-label">Image Size</label>
+                                    <select class="form-control" id="generate-size">
+                                        <option value="1024x1024">Square (1024x1024)</option>
+                                        <option value="1024x1792">Portrait (1024x1792)</option>
+                                        <option value="1792x1024">Landscape (1792x1024)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="alert alert-info mt-3" id="provider-info">
+                                <strong>Cloud Generation:</strong> Uses OpenAI DALL-E 3. Requires OpenAI API key and incurs usage costs.
+                            </div>
+                            <button type="submit" class="btn btn-success mt-3">
+                                <span class="spinner spinner-border spinner-border-sm me-2" role="status"></span>
+                                Generate Image
                             </button>
                         </form>
                     </div>
@@ -1610,10 +1938,14 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                         $('#projection-result').html(wrapWithActions(`
                             <div class="result">
                                 <h4>Allegorical Projection</h4>
-                                <div class="mb-3">
-                                    <strong>Final Projection:</strong>
-                                    <div class="markdown-content">${renderMarkdown(result.final_projection)}</div>
-                                </div>
+                                ${createMainContentBlock("Final Projection", renderMarkdown(result.final_projection), null, {
+                                    type: 'projection',
+                                    originalText: data.narrative,
+                                    persona: result.persona,
+                                    namespace: result.namespace,
+                                    style: result.style,
+                                    textToRefine: result.final_projection
+                                })}
                                 <div class="mb-3">
                                     <strong>Reflection:</strong>
                                     <div class="markdown-content">${renderMarkdown(result.reflection)}</div>
@@ -1705,14 +2037,18 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                                     <strong>Original Text:</strong>
                                     <div class="markdown-content">${renderMarkdown(result.original_text)}</div>
                                 </div>
-                                <div class="mb-3">
-                                    <strong>Forward Translation (${data.intermediate_language}):</strong>
-                                    <div class="markdown-content">${renderMarkdown(result.intermediate_text || 'Not available')}</div>
-                                </div>
-                                <div class="mb-3">
-                                    <strong>After Round-trip:</strong>
-                                    <div class="markdown-content">${renderMarkdown(result.final_text)}</div>
-                                </div>
+                                ${createMainContentBlock("Translation", renderMarkdown(result.intermediate_text || 'Not available'), null, {
+                                    type: 'translation',
+                                    originalText: result.original_text,
+                                    targetLanguage: data.intermediate_language,
+                                    textToRefine: result.intermediate_text
+                                })}
+                                ${createMainContentBlock("Back-Translation", renderMarkdown(result.final_text), null, {
+                                    type: 'translation',
+                                    originalText: result.intermediate_text,
+                                    targetLanguage: 'English',
+                                    textToRefine: result.final_text
+                                })}
                                 <div class="mb-3">
                                     <strong>Analysis:</strong>
                                     <div class="markdown-content">${renderMarkdown(result.analysis || 'Analysis completed')}</div>
@@ -1743,9 +2079,10 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             // Update button styles
             $('#transcription-mode-btn').removeClass('vision-mode-active btn-primary').addClass('btn-outline-primary');
             $('#redraw-mode-btn').removeClass('vision-mode-active btn-secondary').addClass('btn-outline-secondary');
+            $('#generate-mode-btn').removeClass('vision-mode-active btn-success').addClass('btn-outline-success');
             
             // Hide all forms
-            $('#transcription-form, #redraw-form').hide();
+            $('#transcription-form, #redraw-form, #generate-form').hide();
             
             if (mode === 'transcription') {
                 $('#transcription-mode-btn').removeClass('btn-outline-primary').addClass('btn-primary vision-mode-active');
@@ -1753,6 +2090,22 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
             } else if (mode === 'redraw') {
                 $('#redraw-mode-btn').removeClass('btn-outline-secondary').addClass('btn-secondary vision-mode-active');
                 $('#redraw-form').show();
+            } else if (mode === 'generate') {
+                $('#generate-mode-btn').removeClass('btn-outline-success').addClass('btn-success vision-mode-active');
+                $('#generate-form').show();
+            }
+        }
+        
+        function updateGenerateOptions() {
+            const provider = $('#generate-provider').val();
+            if (provider === 'ollamadiffuser') {
+                $('#local-model-options').show();
+                $('#cloud-size-options').hide();
+                $('#provider-info').html('<strong>Local Generation:</strong> Requires Python 3.10+ and OllamaDiffuser. Install with: <code>pip install ollamadiffuser</code><br><small>If you get version errors, recreate your virtual environment with Python 3.10+</small>');
+            } else if (provider === 'openai') {
+                $('#local-model-options').hide();
+                $('#cloud-size-options').show();
+                $('#provider-info').html('<strong>Cloud Generation:</strong> Uses OpenAI DALL-E 3. Requires OpenAI API key and incurs usage costs.');
             }
         }
         
@@ -1867,15 +2220,16 @@ Begin transcription:`;
                 const namespace = $('#redraw-namespace').val();
                 const style = $('#redraw-style').val();
                 
-                const prompt = `As a ${persona} working in the ${namespace} context with a ${style} approach, analyze this image and create a detailed description that could be used to recreate or reinterpret it artistically.
+                const prompt = `As a ${persona} working in the ${namespace} context with a ${style} approach, provide a concise but essential analysis of this image in 1200 tokens or less.
 
-Please provide:
-1. Detailed visual analysis of the image
-2. Artistic interpretation through your ${persona} perspective
-3. Creative reimagining in the ${namespace} style
-4. Technical notes for artistic recreation
+Focus on:
+- Core visual elements, composition, and spatial relationships
+- Dominant colors, lighting quality, and atmospheric mood
+- Key symbolic elements and their deeper meaning
+- Artistic style and technique evident
+- The essential essence that would guide artistic reinterpretation
 
-Focus on capturing both the literal elements and the artistic essence that could inspire a new work.`;
+Avoid excessive detail. Capture the image's soul - what would preserve its essential meaning in a new artistic incarnation? Think like an inner embedding: extract the latent meaning that can be projected through different artistic lenses.`;
                 
                 const data = {
                     prompt: prompt,
@@ -1907,14 +2261,19 @@ Focus on capturing both the literal elements and the artistic essence that could
                                     <div class="mb-3">
                                         <strong>Model:</strong> ${data.model}
                                     </div>
-                                    <div class="mb-3">
-                                        <strong>Analysis & Recreation Guide:</strong>
-                                        <div class="markdown-content">${renderMarkdown(result.analysis)}</div>
-                                    </div>
+                                    ${createMainContentBlock("Analysis & Recreation Guide", renderMarkdown(result.analysis))}
                                     <div class="mb-3">
                                         <strong>Original Image:</strong><br>
                                         <img src="${e.target.result}" class="img-fluid" style="max-width: 400px; border-radius: 8px;">
                                     </div>
+                                    <div class="mb-3">
+                                        <button class="btn btn-success" onclick="generateRedrawImage('${persona}', '${namespace}', '${style}')">
+                                            <span class="spinner-border spinner-border-sm me-2" style="display: none;"></span>
+                                            🎨 Generate New Image from Analysis
+                                        </button>
+                                        <div class="form-text">This will create a new image based on the artistic analysis above</div>
+                                    </div>
+                                    <div id="redraw-generated-image" style="display: none;"></div>
                                 </div>
                             `, fullText)).show();
                         }
@@ -1927,6 +2286,352 @@ Focus on capturing both the literal elements and the artistic essence that could
             };
             reader.readAsDataURL(file);
         });
+        
+        // Image generation form handler
+        $('#vision-generate-form').submit(function(e) {
+            e.preventDefault();
+            const button = $(this).find('button[type="submit"]');
+            const prompt = $('#generate-prompt').val().trim();
+            
+            if (!prompt) {
+                alert('Please enter a description for the image you want to generate.');
+                return;
+            }
+            
+            showSpinner(button);
+            
+            const data = {
+                prompt: prompt,
+                provider: $('#generate-provider').val(),
+                model: $('#generate-model').val(),
+                size: $('#generate-size').val()
+            };
+            
+            $.ajax({
+                url: '/api/image/generate',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(data),
+                success: function(response) {
+                    hideSpinner(button);
+                    if (response.success && response.result) {
+                        const result = response.result;
+                        const fullText = `# Generated Image\\n\\n## Prompt\\n${result.prompt}\\n\\n## Model\\n${result.model} (${result.provider})\\n\\n## Settings\\n${result.size || 'Default size'}`;
+                        
+                        $('#vision-result').html(wrapWithActions(`
+                            <div class="result">
+                                <h4>Generated Image</h4>
+                                <div class="mb-3">
+                                    <strong>Provider:</strong> ${result.provider === 'ollamadiffuser' ? 'Local OllamaDiffuser' : 'OpenAI DALL-E'}
+                                </div>
+                                <div class="mb-3">
+                                    <strong>Model:</strong> ${result.model}
+                                </div>
+                                ${result.size ? `<div class="mb-3"><strong>Size:</strong> ${result.size}</div>` : ''}
+                                ${createMainContentBlock("Image Prompt", result.prompt)}
+                                <div class="mb-3">
+                                    <strong>Generated Image:</strong><br>
+                                    <img src="${result.image_url}" class="img-fluid" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                                </div>
+                            </div>
+                        `, fullText)).show();
+                    }
+                },
+                error: function(xhr) {
+                    hideSpinner(button);
+                    const errorMsg = xhr.responseJSON?.error || 'Unknown error';
+                    if (errorMsg.includes('OllamaDiffuser not running')) {
+                        alert('OllamaDiffuser is not running. Please install it with:\\n\\npip install ollamadiffuser\\n\\nThen run:\\n\\nollamadiffuser run flux.1-schnell\\n\\nOr switch to OpenAI DALL-E in the provider dropdown.');
+                    } else {
+                        alert('Error generating image: ' + errorMsg);
+                    }
+                }
+            });
+        });
+        
+        // Generate image from redraw analysis
+        function generateRedrawImage(persona, namespace, style) {
+            const button = event.target;
+            const spinner = button.querySelector('.spinner-border');
+            
+            // Show spinner
+            spinner.style.display = 'inline-block';
+            button.disabled = true;
+            
+            // Get analysis from the main content block
+            const analysisBlock = document.querySelector('[data-content="Analysis & Recreation Guide"]');
+            const fullAnalysis = analysisBlock ? analysisBlock.textContent : '';
+            
+            console.log('Analysis block found:', !!analysisBlock);
+            console.log('Analysis length:', fullAnalysis.length);
+            
+            if (!analysisBlock || fullAnalysis.length === 0) {
+                alert('Error: No analysis found. Please run the vision analysis first before generating a redraw.');
+                spinner.style.display = 'none';
+                button.disabled = false;
+                return;
+            }
+            
+            // Handle token limits - DALL-E has ~4000 character limit
+            let analysis = fullAnalysis;
+            const maxAnalysisLength = 2000; // Leave room for the rest of the prompt
+            
+            if (fullAnalysis.length > maxAnalysisLength) {
+                // Extract key visual elements from the beginning and end of analysis
+                const beginning = fullAnalysis.substring(0, 1000);
+                const end = fullAnalysis.substring(fullAnalysis.length - 500);
+                analysis = beginning + "\\n\\n[... detailed analysis continues ...]\\n\\n" + end;
+                
+                console.log(`Analysis truncated from ${fullAnalysis.length} to ${analysis.length} characters for image generation`);
+            }
+            
+            // Create a well-structured artistic prompt from the analysis
+            const imagePrompt = `Create an image from the perspective of a ${persona} working in the ${namespace} style with a ${style} approach.
+
+Based on this visual analysis: ${analysis}
+
+Generate an artistic reinterpretation that captures the key visual elements, composition, and mood described while applying the ${persona}'s ${namespace} ${style} artistic perspective.`;
+            
+            const data = {
+                prompt: imagePrompt,
+                provider: 'openai',  // Default to working provider for redraw
+                model: 'dall-e-3',
+                size: '1024x1024'
+            };
+            
+            $.ajax({
+                url: '/api/image/generate',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(data),
+                success: function(response) {
+                    spinner.style.display = 'none';
+                    button.disabled = false;
+                    
+                    if (response.success && response.result) {
+                        const result = response.result;
+                        const analysisInfo = fullAnalysis.length > maxAnalysisLength ? 
+                            `<div class="alert alert-info"><small>📏 Analysis: ${fullAnalysis.length} chars → ${analysis.length} chars (truncated for image generation)</small></div>` : 
+                            `<div class="alert alert-info"><small>📏 Analysis: ${analysis.length} characters used from vision analysis</small></div>`;
+                        
+                        $('#redraw-generated-image').html(`
+                            <div class="alert alert-success">
+                                <h5>🎨 Generated Reinterpretation</h5>
+                                ${analysisInfo}
+                                <div class="mb-3">
+                                    <strong>Generated Image:</strong><br>
+                                    <img src="${result.image_url}" class="img-fluid" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                                </div>
+                                <details class="mt-3">
+                                    <summary>View Generation Prompt</summary>
+                                    <div class="alert alert-secondary mt-2">
+                                        <small>${result.prompt}</small>
+                                    </div>
+                                </details>
+                                
+                                <!-- Echo and Evolve Interface -->
+                                <div class="mt-4 p-3 border rounded" style="background-color: #f8f9fa;">
+                                    <h6>🔄 Echo & Evolve</h6>
+                                    <p class="small text-muted">Describe this generation, add new directions, then create the next iteration</p>
+                                    
+                                    <div class="mb-3">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="echoCurrentImage('${result.image_url}', '${persona}', '${namespace}', '${style}')">
+                                            <span class="spinner-border spinner-border-sm me-1" style="display: none;" id="echo-spinner"></span>
+                                            🔍 Echo (Describe This Image)
+                                        </button>
+                                    </div>
+                                    
+                                    <div id="echo-description" style="display: none;">
+                                        <label class="form-label">Echo Description:</label>
+                                        <textarea class="form-control mb-3" id="echo-text" rows="4" readonly></textarea>
+                                        
+                                        <label class="form-label">Add New Directions:</label>
+                                        <input type="text" class="form-control mb-3" id="evolve-instructions" 
+                                               placeholder="e.g., 'make it more ethereal', 'add clockwork elements', 'shift to sunset lighting'">
+                                        
+                                        <button class="btn btn-success btn-sm" onclick="generateNextIteration('${persona}', '${namespace}', '${style}')">
+                                            <span class="spinner-border spinner-border-sm me-1" style="display: none;" id="evolve-spinner"></span>
+                                            ➡️ Generate Next Iteration
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <small class="text-muted">Generated using ${result.provider === 'ollamadiffuser' ? 'Local OllamaDiffuser' : 'OpenAI DALL-E'} (${result.model})</small>
+                            </div>
+                        `).show();
+                    }
+                },
+                error: function(xhr) {
+                    spinner.style.display = 'none';
+                    button.disabled = false;
+                    
+                    const errorMsg = xhr.responseJSON?.error || 'Unknown error';
+                    if (errorMsg.includes('OllamaDiffuser not running')) {
+                        alert('To generate the redrawn image, please install OllamaDiffuser:\\n\\npip install ollamadiffuser\\nollamadiffuser run flux.1-schnell\\n\\nOr ensure OpenAI API key is configured for DALL-E.');
+                    } else {
+                        alert('Error generating redrawn image: ' + errorMsg);
+                    }
+                }
+            });
+        }
+        
+        // Echo and Evolve Functions
+        function echoCurrentImage(imageUrl, persona, namespace, style) {
+            const spinner = document.getElementById('echo-spinner');
+            const button = event.target;
+            
+            // Show spinner
+            spinner.style.display = 'inline-block';
+            button.disabled = true;
+            
+            // Use image proxy to bypass CORS restrictions
+            fetch('/api/image/proxy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url: imageUrl})
+            })
+            .then(response => response.json())
+            .then(proxyResult => {
+                if (!proxyResult.success) {
+                    throw new Error(proxyResult.error);
+                }
+                const imageData = proxyResult.image_data;
+                
+                // Create concise echo prompt
+                const echoPrompt = `As a ${persona} working in the ${namespace} context with a ${style} approach, provide a concise but essential description of this image in 1200 tokens or less. 
+
+Focus on:
+- Core visual elements and composition
+- Dominant colors, lighting, and mood
+- Key symbolic or meaningful details
+- Artistic style and technique evident
+- The essence that would guide a reinterpretation
+
+Avoid: Overly detailed descriptions, subtle nuances, or verbose analysis. Capture the essential meaning that would preserve the image's soul in a new generation.`;
+                
+                const data = {
+                    prompt: echoPrompt,
+                    model: 'gemini-2.5-pro',
+                    image_data: imageData,
+                    persona: persona,
+                    namespace: namespace,
+                    style: style
+                };
+                
+                $.ajax({
+                    url: '/api/vision/redraw',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function(response) {
+                        spinner.style.display = 'none';
+                        button.disabled = false;
+                        
+                        if (response.success && response.result) {
+                            document.getElementById('echo-text').value = response.result.analysis;
+                            document.getElementById('echo-description').style.display = 'block';
+                        }
+                    },
+                    error: function(xhr) {
+                        spinner.style.display = 'none';
+                        button.disabled = false;
+                        console.error('Echo API error:', xhr);
+                        const errorMsg = xhr.responseJSON ? xhr.responseJSON.error : 'Unknown error';
+                        alert('Error generating echo description: ' + errorMsg);
+                    }
+                });
+            })
+                .catch(error => {
+                    spinner.style.display = 'none';
+                    button.disabled = false;
+                    console.error('Error fetching image:', error);
+                    alert('Error accessing image for echo analysis. This might be due to CORS restrictions on external image URLs.');
+                });
+        }
+        
+        function generateNextIteration(persona, namespace, style) {
+            const spinner = document.getElementById('evolve-spinner');
+            const button = event.target;
+            const echoText = document.getElementById('echo-text').value;
+            const newInstructions = document.getElementById('evolve-instructions').value;
+            
+            if (!echoText) {
+                alert('Please generate an echo description first');
+                return;
+            }
+            
+            // Show spinner
+            spinner.style.display = 'inline-block';
+            button.disabled = true;
+            
+            // Combine echo with new instructions
+            let combinedPrompt = `Create an image from the perspective of a ${persona} working in the ${namespace} style with a ${style} approach.
+
+Based on this current state: ${echoText}`;
+            
+            if (newInstructions && newInstructions.trim()) {
+                combinedPrompt += `
+
+Evolve the image with these new directions: ${newInstructions}`;
+            }
+            
+            combinedPrompt += `
+
+Generate the next iteration that maintains the essential meaning while incorporating the new directions. Focus on the deeper symbolic resonance rather than literal recreation.`;
+            
+            const data = {
+                prompt: combinedPrompt,
+                provider: 'openai',
+                model: 'dall-e-3',
+                size: '1024x1024'
+            };
+            
+            $.ajax({
+                url: '/api/image/generate',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(data),
+                success: function(response) {
+                    spinner.style.display = 'none';
+                    button.disabled = false;
+                    
+                    if (response.success && response.result) {
+                        const result = response.result;
+                        
+                        // Add the new iteration below the current one
+                        const newIterationHtml = `
+                            <div class="mt-4 p-3 border rounded" style="background-color: #fff3e0;">
+                                <h6>🎯 Next Iteration</h6>
+                                <div class="mb-3">
+                                    <strong>Evolved Image:</strong><br>
+                                    <img src="${result.image_url}" class="img-fluid" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                                </div>
+                                <small class="text-muted">Generated using ${result.provider === 'ollamadiffuser' ? 'Local OllamaDiffuser' : 'OpenAI DALL-E'} (${result.model})</small>
+                                
+                                <!-- Echo and Evolve Interface for this iteration -->
+                                <div class="mt-3 p-3 border rounded" style="background-color: #f8f9fa;">
+                                    <h6>🔄 Echo & Evolve</h6>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="echoCurrentImage('${result.image_url}', '${persona}', '${namespace}', '${style}')">
+                                        <span class="spinner-border spinner-border-sm me-1" style="display: none;"></span>
+                                        🔍 Echo This Iteration
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        
+                        $('#redraw-generated-image').append(newIterationHtml);
+                        
+                        // Clear the evolve instructions for next use
+                        document.getElementById('evolve-instructions').value = '';
+                    }
+                },
+                error: function(xhr) {
+                    spinner.style.display = 'none';
+                    button.disabled = false;
+                    alert('Error generating next iteration');
+                }
+            });
+        }
         
         // Comparison Modal Functions
         function showComparisonModal(imageData, transcriptionResult, model) {
@@ -1947,7 +2652,7 @@ Focus on capturing both the literal elements and the artistic essence that could
             document.getElementById('transcription-edit-time').textContent = 'Not edited';
             
             // Extract confidence if present
-            const confidenceMatch = transcriptionText.match(/confidence[:\s]+(\d+(?:\.\d+)?%?)/i);
+            const confidenceMatch = transcriptionText.match(/confidence[:\\s]+(\\d+(?:\\.\\d+)?%?)/i);
             document.getElementById('transcription-confidence').textContent = confidenceMatch ? confidenceMatch[1] : 'Not specified';
             
             // Show modal
@@ -1962,7 +2667,7 @@ Focus on capturing both the literal elements and the artistic essence that could
         
         function makeWordsEditable(text) {
             // Split text into words while preserving whitespace and punctuation
-            return text.replace(/(\S+)/g, function(word, match) {
+            return text.replace(/(\\S+)/g, function(word, match) {
                 const isUncertain = word.includes('[') && word.includes('?');
                 const confidenceClass = isUncertain ? (word.includes('??') ? 'word-confidence-low' : 'word-confidence-medium') : '';
                 return `<span class="editable-word ${confidenceClass}" data-original="${match}" onclick="editWord(this)">${match}</span>`;
@@ -2113,6 +2818,46 @@ ${text}
             setTimeout(() => {
                 feedback.style.display = 'none';
             }, 2000);
+        }
+        
+        // Main Content Block Functions
+        function createMainContentBlock(title, content, id, refineData) {
+            const blockId = id || `main-block-${Date.now()}`;
+            const refineButton = refineData ? 
+                `<button class="block-refine-btn btn btn-outline-secondary btn-sm ms-2" onclick="openRefineModal('${blockId}')" title="Refine & Evolve this content" data-refine-data='${JSON.stringify(refineData)}' data-title='${title.replace(/'/g, "&apos;")}'>🔄 Refine</button>` : '';
+            
+            return `
+                <div class="main-content-block" id="${blockId}">
+                    <div class="content-header">${title}</div>
+                    <div class="block-actions">
+                        <button class="block-copy-btn" onclick="copyMainContent('${blockId}')" title="Copy this content">📋</button>
+                        ${refineButton}
+                    </div>
+                    <div class="main-content" data-content="${title}">
+                        ${content}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function copyMainContent(blockId) {
+            const block = document.getElementById(blockId);
+            const contentDiv = block.querySelector('.main-content');
+            const text = contentDiv.textContent || contentDiv.innerText;
+            
+            navigator.clipboard.writeText(text).then(function() {
+                const title = contentDiv.getAttribute('data-content');
+                showFeedback(`${title} copied to clipboard!`);
+            }).catch(function() {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showFeedback(`${title} copied to clipboard!`);
+            });
         }
         
         // Generation Modal Functions
@@ -2344,7 +3089,7 @@ ${text}
                         const fullText = `# Revised Narrative\n\n${revisedNarrative}`;
                         
                         document.getElementById('revised-narrative').innerHTML = wrapWithActions(
-                            renderMarkdown(revisedNarrative), 
+                            createMainContentBlock("Final Revised Narrative", renderMarkdown(revisedNarrative)), 
                             fullText
                         );
                         document.getElementById('synthesis-result').style.display = 'block';
@@ -2546,7 +3291,203 @@ ${text}
                 button.parentElement.remove();
             }
         }
+        
+        // Refine & Evolve Modal Functions
+        function openRefineModal(blockId) {
+            // Get data from the button that was clicked
+            const refineButton = event.target;
+            const refineData = JSON.parse(refineButton.getAttribute('data-refine-data'));
+            const title = refineButton.getAttribute('data-title').replace(/&apos;/g, "'");
+            
+            const modal = document.getElementById('refineModal');
+            const textElement = document.querySelector(`#${blockId} .main-content`);
+            const currentText = textElement.textContent.trim();
+            
+            // Set modal title and current text
+            document.getElementById('refineModalLabel').textContent = `Refine & Evolve: ${title}`;
+            document.getElementById('currentText').value = currentText;
+            
+            // Set form fields based on refine data
+            if (refineData.type === 'projection') {
+                document.getElementById('refinePersona').value = refineData.persona || 'artist';
+                document.getElementById('refineNamespace').value = refineData.namespace || 'modern-art';
+                document.getElementById('refineStyle').value = refineData.style || 'detailed';
+            }
+            
+            // Store refine data for later use
+            modal.setAttribute('data-refine-info', JSON.stringify(refineData));
+            modal.setAttribute('data-block-id', blockId);
+            
+            // Show modal
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
+        }
+        
+        function submitRefinement() {
+            const modal = document.getElementById('refineModal');
+            const refineData = JSON.parse(modal.getAttribute('data-refine-info'));
+            const blockId = modal.getAttribute('data-block-id');
+            
+            const refinementPrompt = document.getElementById('refinementPrompt').value;
+            const currentText = document.getElementById('currentText').value;
+            const persona = document.getElementById('refinePersona').value;
+            const namespace = document.getElementById('refineNamespace').value;
+            const style = document.getElementById('refineStyle').value;
+            
+            if (!refinementPrompt.trim()) {
+                alert('Please enter refinement instructions');
+                return;
+            }
+            
+            // Show loading state
+            const submitBtn = document.getElementById('submitRefinement');
+            const spinner = submitBtn.querySelector('.spinner-border');
+            spinner.style.display = 'inline-block';
+            submitBtn.disabled = true;
+            
+            // Create refinement request
+            const prompt = `As a ${persona} working in the ${namespace} context with a ${style} approach, refine and evolve the following text based on these instructions:
+
+REFINEMENT INSTRUCTIONS: ${refinementPrompt}
+
+CURRENT TEXT TO REFINE:
+${currentText}
+
+Please provide an evolved version that incorporates the refinement instructions while maintaining the essential meaning and improving the overall quality. Focus on the deeper significance and enhanced expression.`;
+            
+            const requestData = {
+                prompt: prompt,
+                narrative: currentText,
+                persona: persona,
+                namespace: namespace,
+                style: style,
+                mode: 'refinement'
+            };
+            
+            // Submit refinement request
+            $.ajax({
+                url: '/api/projection/immediate',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(requestData),
+                success: function(response) {
+                    spinner.style.display = 'none';
+                    submitBtn.disabled = false;
+                    
+                    if (response.success && response.result) {
+                        // Create new refined content block
+                        const refinedTitle = `Refined: ${document.getElementById('refineModalLabel').textContent.replace('Refine & Evolve: ', '')}`;
+                        const refinedContent = createMainContentBlock(
+                            refinedTitle, 
+                            renderMarkdown(response.result.final_projection),
+                            null,
+                            {
+                                type: 'projection',
+                                originalText: currentText,
+                                persona: persona,
+                                namespace: namespace,
+                                style: style,
+                                textToRefine: response.result.final_projection,
+                                refinementPrompt: refinementPrompt
+                            }
+                        );
+                        
+                        // Add refined content after the original
+                        $(`#${blockId}`).after(`
+                            <div class="mt-4 p-3 border rounded" style="background-color: #f0f8ff;">
+                                <h6>🎯 Refined Iteration</h6>
+                                ${refinedContent}
+                                <small class="text-muted mt-2 d-block">
+                                    Refinement: "${refinementPrompt}" | 
+                                    Persona: ${persona} | Namespace: ${namespace} | Style: ${style}
+                                </small>
+                            </div>
+                        `);
+                        
+                        // Close modal
+                        bootstrap.Modal.getInstance(modal).hide();
+                        
+                        // Clear form
+                        document.getElementById('refinementPrompt').value = '';
+                    }
+                },
+                error: function(xhr) {
+                    spinner.style.display = 'none';
+                    submitBtn.disabled = false;
+                    alert('Error processing refinement: ' + (xhr.responseJSON?.error || 'Unknown error'));
+                }
+            });
+        }
     </script>
+    
+    <!-- Refine & Evolve Modal -->
+    <div class="modal fade" id="refineModal" tabindex="-1" aria-labelledby="refineModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="refineModalLabel">Refine & Evolve Text</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="currentText" class="form-label">Current Text:</label>
+                        <textarea class="form-control" id="currentText" rows="6" readonly style="background-color: #f8f9fa;"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="refinementPrompt" class="form-label">Refinement Instructions:</label>
+                        <input type="text" class="form-control" id="refinementPrompt" 
+                               placeholder="e.g., 'make it more poetic', 'add scientific precision', 'simplify for broader audience'">
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label for="refinePersona" class="form-label">Persona:</label>
+                            <select class="form-select" id="refinePersona">
+                                <option value="artist">Artist</option>
+                                <option value="philosopher">Philosopher</option>
+                                <option value="scientist">Scientist</option>
+                                <option value="poet">Poet</option>
+                                <option value="storyteller">Storyteller</option>
+                                <option value="teacher">Teacher</option>
+                                <option value="mystic">Mystic</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="refineNamespace" class="form-label">Namespace:</label>
+                            <select class="form-select" id="refineNamespace">
+                                <option value="modern-art">Modern Art</option>
+                                <option value="classical">Classical</option>
+                                <option value="science-fiction">Science Fiction</option>
+                                <option value="mythology">Mythology</option>
+                                <option value="psychology">Psychology</option>
+                                <option value="philosophy">Philosophy</option>
+                                <option value="nature">Nature</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="refineStyle" class="form-label">Style:</label>
+                            <select class="form-select" id="refineStyle">
+                                <option value="detailed">Detailed</option>
+                                <option value="concise">Concise</option>
+                                <option value="poetic">Poetic</option>
+                                <option value="academic">Academic</option>
+                                <option value="conversational">Conversational</option>
+                                <option value="dramatic">Dramatic</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="submitRefinement" onclick="submitRefinement()">
+                        <span class="spinner-border spinner-border-sm me-1" style="display: none;"></span>
+                        🔄 Refine & Evolve
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>"""
         

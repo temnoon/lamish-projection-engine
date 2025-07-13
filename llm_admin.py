@@ -12,6 +12,10 @@ import urllib.request
 # Add to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Import configurations
+from model_config import task_model_config
+from llm_providers import llm_manager
+
 class LLMAdmin:
     def __init__(self):
         self.config_file = Path.home() / ".lpe" / "llm_config.json"
@@ -53,6 +57,16 @@ class LLMAdmin:
         except Exception as e:
             print(f"Error getting models: {e}")
             return []
+    
+    def get_available_providers(self):
+        """Get available providers and their models."""
+        providers = {
+            "openai": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "dall-e-3"],
+            "anthropic": ["claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-3-opus-20240229"],
+            "google": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.5-flash"],
+            "ollama": self.get_available_models()
+        }
+        return providers
 
 class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -77,10 +91,97 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
         
         if path == '/api/config':
             self.update_config()
+        elif path == '/api/task-config':
+            self.update_task_config()
         else:
             self.send_response(404)
             self.end_headers()
     
+    def generate_task_config_html(self):
+        """Generate HTML for task-specific model configuration."""
+        providers = self.admin.get_available_providers()
+        tasks = task_model_config.get_available_tasks()
+        
+        html_parts = []
+        
+        for task in tasks:
+            task_config = task_model_config.get_task_config(task)
+            display_name = task_model_config.get_task_display_name(task)
+            
+            # Special handling for image generation
+            if task == "image_generation":
+                html_parts.append(f"""
+                <div class="form-group" style="border: 1px solid #ddd; padding: 20px; border-radius: 6px; margin-bottom: 20px;">
+                    <h3>{display_name}</h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div>
+                            <label for="{task}_cloud_provider">Cloud Provider:</label>
+                            <select id="{task}_cloud_provider" name="{task}_cloud_provider">
+                                {''.join(f'<option value="{provider}" {"selected" if provider == task_config.get("cloud_provider") else ""}>{provider.title()}</option>' for provider in ["openai"])}
+                            </select>
+                            <label for="{task}_cloud_model">Cloud Model:</label>
+                            <select id="{task}_cloud_model" name="{task}_cloud_model">
+                                {''.join(f'<option value="{model}" {"selected" if model == task_config.get("cloud_model") else ""}>{model}</option>' for model in providers.get("openai", []))}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="{task}_local_provider">Local Provider:</label>
+                            <select id="{task}_local_provider" name="{task}_local_provider">
+                                <option value="ollamadiffuser" {"selected" if task_config.get("local_provider") == "ollamadiffuser" else ""}>OllamaDiffuser</option>
+                            </select>
+                            <label for="{task}_local_model">Local Model:</label>
+                            <select id="{task}_local_model" name="{task}_local_model">
+                                <option value="flux.1-schnell" {"selected" if task_config.get("local_model") == "flux.1-schnell" else ""}>FLUX.1 Schnell</option>
+                                <option value="flux.1-dev" {"selected" if task_config.get("local_model") == "flux.1-dev" else ""}>FLUX.1 Dev</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="{task}_default_provider">Default Provider:</label>
+                        <select id="{task}_default_provider" name="{task}_default_provider">
+                            <option value="openai" {"selected" if task_config.get("default_provider") == "openai" else ""}>OpenAI (Cloud)</option>
+                            <option value="ollamadiffuser" {"selected" if task_config.get("default_provider") == "ollamadiffuser" else ""}>OllamaDiffuser (Local)</option>
+                        </select>
+                    </div>
+                </div>
+                """)
+            else:
+                # Regular LLM tasks
+                html_parts.append(f"""
+                <div class="form-group" style="border: 1px solid #ddd; padding: 20px; border-radius: 6px; margin-bottom: 20px;">
+                    <h3>{display_name}</h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                        <div>
+                            <label for="{task}_provider">Provider:</label>
+                            <select id="{task}_provider" name="{task}_provider">
+                                {''.join(f'<option value="{provider}" {"selected" if provider == task_config.get("provider") else ""}>{provider.title()}</option>' for provider in providers.keys())}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="{task}_model">Model:</label>
+                            <select id="{task}_model" name="{task}_model">
+                                {''.join(f'<option value="{model}" {"selected" if model == task_config.get("model") else ""}>{model}</option>' for model in providers.get(task_config.get("provider", "google"), []))}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label for="{task}_temperature">Temperature:</label>
+                            <input type="range" id="{task}_temperature" name="{task}_temperature" 
+                                   min="0" max="2" step="0.1" value="{task_config.get('temperature', 0.7)}"
+                                   oninput="document.getElementById('{task}_temp_val').textContent = this.value">
+                            <span id="{task}_temp_val">{task_config.get('temperature', 0.7)}</span>
+                        </div>
+                    </div>
+                </div>
+                """)
+        
+        return ''.join(html_parts)
+
     def serve_admin_interface(self):
         """Serve the LLM admin interface."""
         self.send_response(200)
@@ -88,6 +189,8 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         
         available_models = self.admin.get_available_models()
+        providers = self.admin.get_available_providers()
+        providers_json = json.dumps(providers)
         
         html = f"""<!DOCTYPE html>
 <html>
@@ -192,7 +295,14 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
         <div id="status" style="display: none;"></div>
         
         <form id="config-form">
-            <h2>Language Model Configuration</h2>
+            <h2>Task-Specific Model Configuration</h2>
+            <p>Configure different models for specific LLM tasks to optimize performance.</p>
+            
+            <div id="task-configs">
+                {self.generate_task_config_html()}
+            </div>
+            
+            <h2>Legacy Model Configuration</h2>
             
             <div class="form-group">
                 <label for="llm_model">Primary LLM Model:</label>
@@ -252,8 +362,9 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
                 <small>URL of the Ollama API server</small>
             </div>
             
-            <button type="submit" class="btn">Save Configuration</button>
+            <button type="submit" class="btn">Save Legacy Configuration</button>
             <button type="button" class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+            <button type="button" class="btn" onclick="saveTaskConfig()">Save Task Configuration</button>
         </form>
         
         <div class="model-info">
@@ -320,6 +431,96 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
                 showStatus('Connection test failed: ' + error, true);
             }});
         }}
+        
+        // Provider-model mapping
+        const providerModels = {providers_json};
+        
+        function updateModelDropdown(task, provider) {{
+            const modelSelect = document.getElementById(task + '_model');
+            const models = providerModels[provider] || [];
+            
+            // Clear existing options
+            modelSelect.innerHTML = '';
+            
+            // Add new options
+            models.forEach(model => {{
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                modelSelect.appendChild(option);
+            }});
+        }}
+        
+        // Add event listeners for provider changes
+        document.addEventListener('DOMContentLoaded', function() {{
+            const tasks = ['projection', 'translation', 'maieutic', 'vision_transcription', 'vision_analysis'];
+            
+            tasks.forEach(task => {{
+                const providerSelect = document.getElementById(task + '_provider');
+                if (providerSelect) {{
+                    providerSelect.addEventListener('change', function() {{
+                        updateModelDropdown(task, this.value);
+                    }});
+                }}
+            }});
+            
+            // Special handling for image generation cloud provider
+            const imageCloudProviderSelect = document.getElementById('image_generation_cloud_provider');
+            if (imageCloudProviderSelect) {{
+                imageCloudProviderSelect.addEventListener('change', function() {{
+                    const modelSelect = document.getElementById('image_generation_cloud_model');
+                    const models = providerModels[this.value] || [];
+                    
+                    modelSelect.innerHTML = '';
+                    models.forEach(model => {{
+                        const option = document.createElement('option');
+                        option.value = model;
+                        option.textContent = model;
+                        modelSelect.appendChild(option);
+                    }});
+                }});
+            }}
+        }});
+        
+        function saveTaskConfig() {{
+            const taskConfig = {{}};
+            const tasks = ['projection', 'translation', 'maieutic', 'vision_transcription', 'vision_analysis', 'image_generation'];
+            
+            tasks.forEach(task => {{
+                if (task === 'image_generation') {{
+                    taskConfig[task] = {{
+                        cloud_provider: document.getElementById(task + '_cloud_provider').value,
+                        cloud_model: document.getElementById(task + '_cloud_model').value,
+                        local_provider: document.getElementById(task + '_local_provider').value,
+                        local_model: document.getElementById(task + '_local_model').value,
+                        default_provider: document.getElementById(task + '_default_provider').value
+                    }};
+                }} else {{
+                    taskConfig[task] = {{
+                        provider: document.getElementById(task + '_provider').value,
+                        model: document.getElementById(task + '_model').value,
+                        temperature: parseFloat(document.getElementById(task + '_temperature').value)
+                    }};
+                }}
+            }});
+            
+            fetch('/api/task-config', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify(taskConfig)
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.success) {{
+                    showStatus('Task configuration saved successfully!');
+                }} else {{
+                    showStatus('Error saving task configuration: ' + data.error, true);
+                }}
+            }})
+            .catch(error => {{
+                showStatus('Error: ' + error, true);
+            }});
+        }}
     </script>
 </body>
 </html>"""
@@ -368,6 +569,33 @@ class LLMAdminHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             
             response = {"success": True, "message": "Configuration updated"}
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+            
+        except Exception as e:
+            self.send_response(400)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            
+            response = {"success": False, "error": str(e)}
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+    
+    def update_task_config(self):
+        """Update task-specific model configuration."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            new_config = json.loads(post_data.decode('utf-8'))
+            
+            # Update each task configuration
+            for task, config in new_config.items():
+                task_model_config.update_task_config(task, config)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            
+            response = {"success": True, "message": "Task configuration updated"}
             self.wfile.write(json.dumps(response).encode('utf-8'))
             
         except Exception as e:
