@@ -719,7 +719,7 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
                 language_options += f'    <option value="{code}" {selected}>{name}</option>\n'
             language_options += '</optgroup>\n'
         
-        html = f"""<!DOCTYPE html>
+        html = """<!DOCTYPE html>
 <html>
 <head>
     <title>Lamish Projection Engine</title>
@@ -1860,6 +1860,9 @@ class ImmediateHandler(http.server.BaseHTTPRequestHandler):
     </script>
 </body>
 </html>"""
+        
+        # Replace language options placeholder
+        html = html.replace('{language_options}', language_options)
         
         self.wfile.write(html.encode('utf-8'))
     

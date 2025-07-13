@@ -316,6 +316,10 @@ class UnifiedLLMManager:
             return self.providers[provider_name].test_connection()
         return False
     
+    def get_provider(self, provider_name: str):
+        """Get a specific provider instance."""
+        return self.providers.get(provider_name)
+    
     def set_api_key(self, provider_name: str, api_key: str) -> bool:
         """Set API key for a provider."""
         if keychain.store_api_key(provider_name, api_key):
